@@ -1,12 +1,12 @@
 import Phaser from 'phaser';
 import { socket } from '../socket';
-import room1Image from '../assets/room1.avif';
 
 type Player = {
   name: string;
   x: number;
   y: number;
   color: number;
+  avatarImg?: string;
 };
 
 type PlayersPayload = [string, Player][];
@@ -18,13 +18,15 @@ type PositionUpdate = {
 };
 
 type RemotePlayer = {
-  body: Phaser.GameObjects.Rectangle;
+  body: Phaser.GameObjects.Rectangle | Phaser.GameObjects.Image;
   text: Phaser.GameObjects.Text;
   updates: PositionUpdate[];
+  color: number;
+  avatarImg?: string;
 };
 
 export class GameScene extends Phaser.Scene {
-  player!: Phaser.GameObjects.Rectangle;
+  player!: Phaser.GameObjects.Rectangle | Phaser.GameObjects.Image;
   playerText!: Phaser.GameObjects.Text;
   cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
   wasdKeys!: {
@@ -37,8 +39,51 @@ export class GameScene extends Phaser.Scene {
   lastSent = 0;
   otherPlayers: Map<string, RemotePlayer> = new Map();
 
-  preload() {
-    this.load.image('background', room1Image);
+  // Helper to create body (rectangle or base64 image)
+  createPlayerBody(x: number, y: number, color: number, avatarImg?: string, id?: string): Phaser.GameObjects.Rectangle | Phaser.GameObjects.Image {
+    const key = id ? `avatar_${id}` : 'avatar_local';
+    
+    if (avatarImg) {
+      if (this.textures.exists(key)) {
+        this.textures.remove(key);
+      }
+      this.textures.addBase64(key, avatarImg);
+      
+      const img = this.add.image(x, y, key);
+      img.setDisplaySize(32, 32);
+      return img;
+    } else {
+      return this.add.rectangle(x, y, 32, 32, color);
+    }
+  }
+
+  // Helper to dynamically update player visual when color or avatarImg changes
+  updatePlayerVisual(p: { body: any; color?: number; avatarImg?: string }, color: number, avatarImg?: string, id?: string) {
+    const oldX = p.body.x;
+    const oldY = p.body.y;
+    
+    const hasImage = !!avatarImg;
+    const isCurrentlyImage = p.body instanceof Phaser.GameObjects.Image;
+
+    // Check if we need to reconstruct the body because type changed or image source changed
+    const typeChanged = isCurrentlyImage !== hasImage;
+    const imageChanged = hasImage && p.avatarImg !== avatarImg;
+    const colorChanged = !hasImage && p.color !== color;
+
+    if (typeChanged || imageChanged || colorChanged) {
+      p.body.destroy();
+      p.body = this.createPlayerBody(oldX, oldY, color, avatarImg, id);
+      
+      // Update our stored reference values
+      p.color = color;
+      p.avatarImg = avatarImg;
+
+      // If local player, re-anchor the camera
+      if (!id) {
+        this.player = p.body;
+        this.cameras.main.startFollow(this.player, true, 0.08, 0.08);
+      }
+    }
   }
 
   create() {
@@ -47,10 +92,8 @@ export class GameScene extends Phaser.Scene {
     // 1. Set world bounds
     this.cameras.main.setBounds(0, 0, 2000, 2000);
 
-    // 2. Add background image (scaled to 2000x2000 world size)
-    const bg = this.add.image(1000, 1000, 'background');
-    bg.setDisplaySize(2000, 2000);
-    bg.setDepth(-10); // Ensure background stays behind all player sprites
+    // 2. Draw a beautiful dark space background grid
+    this.add.grid(1000, 1000, 2000, 2000, 64, 64, 0x1a1a1a, 1, 0x2e2e2e, 1);
 
     // 3. Register inputs
     this.cursors = this.input.keyboard!.createCursorKeys();
@@ -65,9 +108,10 @@ export class GameScene extends Phaser.Scene {
     const savedName = sessionStorage.getItem('vl_username') || `Player_${Math.floor(Math.random() * 9000 + 1000)}`;
     const savedColorHex = sessionStorage.getItem('vl_color') || '#00ff00';
     const savedColor = parseInt(savedColorHex.replace('#', '0x'));
+    const savedAvatar = sessionStorage.getItem('vl_avatarImg') || '';
 
     // 5. Create local player and label
-    this.player = this.add.rectangle(200, 200, 32, 32, savedColor);
+    this.player = this.createPlayerBody(200, 200, savedColor, savedAvatar);
     this.playerText = this.add.text(200, 180, savedName, {
       fontSize: '14px',
       color: '#ffffff',
@@ -87,10 +131,12 @@ export class GameScene extends Phaser.Scene {
         const currentName = sessionStorage.getItem('vl_username') || savedName;
         const currentColor = sessionStorage.getItem('vl_color') || savedColorHex;
         const currentRoom = sessionStorage.getItem('vl_roomId') || 'lobby';
+        const currentAvatar = sessionStorage.getItem('vl_avatarImg') || '';
         socket.emit('join', {
           name: currentName,
           roomId: currentRoom,
-          color: parseInt(currentColor.replace('#', '0x'))
+          color: parseInt(currentColor.replace('#', '0x')),
+          avatarImg: currentAvatar
         });
       }
     };
@@ -127,7 +173,7 @@ export class GameScene extends Phaser.Scene {
 
         if (!p) {
           if (!this.add) return;
-          const body = this.add.rectangle(data.x, data.y, 32, 32, data.color);
+          const body = this.createPlayerBody(data.x, data.y, data.color, data.avatarImg, id);
           const text = this.add.text(data.x, data.y - 20, data.name, {
             fontSize: '14px',
             color: '#ffffff',
@@ -138,10 +184,18 @@ export class GameScene extends Phaser.Scene {
           p = {
             body,
             text,
-            updates: []
+            updates: [],
+            color: data.color,
+            avatarImg: data.avatarImg
           };
 
           this.otherPlayers.set(id, p);
+        } else {
+          // If name changed
+          p.text.setText(data.name);
+          
+          // Dynamic visual update if avatar color or image changed
+          this.updatePlayerVisual(p, data.color, data.avatarImg, id);
         }
 
         // Add coordinate updates to the history buffer for interpolation
@@ -157,14 +211,19 @@ export class GameScene extends Phaser.Scene {
 
     // Profile updated listener (from React App.tsx form submit)
     const onProfileUpdate = (e: Event) => {
-      const { name, color } = (e as CustomEvent).detail;
+      const { name, color, avatarImg } = (e as CustomEvent).detail;
       const colorNum = parseInt(color.replace('#', '0x'));
-      if (this.player && this.player.setFillStyle) {
-        this.player.setFillStyle(colorNum);
-      }
+      
       if (this.playerText) {
         this.playerText.setText(name);
       }
+
+      // Update local player visual dynamically
+      this.updatePlayerVisual(
+        { body: this.player, color: savedColor, avatarImg: savedAvatar },
+        colorNum,
+        avatarImg
+      );
     };
 
     window.addEventListener('vl-profile-updated', onProfileUpdate);

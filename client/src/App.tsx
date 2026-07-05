@@ -9,12 +9,15 @@ export default function App() {
   const [name, setName] = useState(() => sessionStorage.getItem('vl_username') || `Player_${Math.floor(Math.random() * 9000 + 1000)}`);
   const [color, setColor] = useState(() => sessionStorage.getItem('vl_color') || '#00ff00');
   const [roomId, setRoomId] = useState(() => sessionStorage.getItem('vl_roomId') || 'lobby');
+  const [avatarImg, setAvatarImg] = useState(() => sessionStorage.getItem('vl_avatarImg') || '');
+  const [imageError, setImageError] = useState('');
 
   useEffect(() => {
     // Save defaults to sessionStorage if not exists
     if (!sessionStorage.getItem('vl_username')) sessionStorage.setItem('vl_username', name);
     if (!sessionStorage.getItem('vl_color')) sessionStorage.setItem('vl_color', color);
     if (!sessionStorage.getItem('vl_roomId')) sessionStorage.setItem('vl_roomId', roomId);
+    if (avatarImg && !sessionStorage.getItem('vl_avatarImg')) sessionStorage.setItem('vl_avatarImg', avatarImg);
 
     const game = initGame('game-container');
     gameRef.current = game;
@@ -27,6 +30,28 @@ export default function App() {
     };
   }, []);
 
+  const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Limit to 200 KB
+    const limitBytes = 200 * 1024;
+    if (file.size > limitBytes) {
+      setImageError('ขนาดไฟล์ต้องไม่เกิน 200 KB');
+      setAvatarImg('');
+      e.target.value = ''; // Reset file input
+      return;
+    }
+
+    setImageError('');
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const base64String = reader.result as string;
+      setAvatarImg(base64String);
+    };
+    reader.readAsDataURL(file);
+  };
+
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
     
@@ -34,17 +59,19 @@ export default function App() {
     sessionStorage.setItem('vl_username', name);
     sessionStorage.setItem('vl_color', color);
     sessionStorage.setItem('vl_roomId', roomId);
+    sessionStorage.setItem('vl_avatarImg', avatarImg);
 
     // Emit join event to the server
     socket.emit('join', {
       name,
       roomId,
-      color: parseInt(color.replace('#', '0x'))
+      color: parseInt(color.replace('#', '0x')),
+      avatarImg
     });
 
     // Notify Phaser game to update local player styling
     window.dispatchEvent(new CustomEvent('vl-profile-updated', {
-      detail: { name, color, roomId }
+      detail: { name, color, roomId, avatarImg }
     }));
   };
 
@@ -211,6 +238,37 @@ export default function App() {
                   />
                   <span style={{ fontSize: '13px', color: '#ccc', fontFamily: 'monospace' }}>{color}</span>
                 </div>
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                <label style={{ fontSize: '11px', color: '#aaa', textTransform: 'uppercase', letterSpacing: '1px' }}>Custom Avatar Image (Max 200KB)</label>
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={handleImageChange}
+                  style={{
+                    padding: '6px',
+                    borderRadius: '8px',
+                    border: '1px solid #444',
+                    backgroundColor: '#222',
+                    color: '#fff',
+                    fontSize: '11px',
+                    cursor: 'pointer'
+                  }}
+                />
+                {imageError && <span style={{ color: '#ff4a4a', fontSize: '11px' }}>{imageError}</span>}
+                {avatarImg && !imageError && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '5px' }}>
+                    <img src={avatarImg} alt="Preview" style={{ width: '32px', height: '32px', borderRadius: '4px', border: '1px solid #555', objectFit: 'cover' }} />
+                    <button 
+                      type="button" 
+                      onClick={() => { setAvatarImg(''); sessionStorage.removeItem('vl_avatarImg'); }} 
+                      style={{ background: 'none', border: 'none', color: '#ff4a4a', cursor: 'pointer', fontSize: '11px', padding: 0 }}
+                    >
+                      ลบรูป
+                    </button>
+                  </div>
+                )}
               </div>
 
               <button

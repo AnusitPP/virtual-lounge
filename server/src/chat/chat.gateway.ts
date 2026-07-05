@@ -13,6 +13,7 @@ type Player = {
   y: number;
   color: number;
   roomId: string;
+  avatarImg?: string;
 };
 
 const players = new Map<string, Player>();
@@ -79,7 +80,7 @@ export class ChatGateway {
 
   @SubscribeMessage('join')
   handleJoin(
-    @MessageBody() data: { name: string; roomId?: string; color?: number },
+    @MessageBody() data: { name: string; roomId?: string; color?: number; avatarImg?: string },
     @ConnectedSocket() client: Socket,
   ) {
     const roomId = data.roomId || 'lobby';
@@ -99,6 +100,7 @@ export class ChatGateway {
       y: 200,
       color: data.color !== undefined ? data.color : Math.floor(Math.random() * 0xffffff),
       roomId,
+      avatarImg: data.avatarImg,
     });
 
     // Broadcast immediately to the new room so others see the join

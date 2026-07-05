@@ -10,6 +10,7 @@ export default function App() {
   const [color, setColor] = useState(() => sessionStorage.getItem('vl_color') || '#00ff00');
   const [roomId, setRoomId] = useState(() => sessionStorage.getItem('vl_roomId') || 'lobby');
   const [avatarImg, setAvatarImg] = useState(() => sessionStorage.getItem('vl_avatarImg') || '');
+  const [selectedBg, setSelectedBg] = useState(() => sessionStorage.getItem('vl_background') || 'room1');
   const [imageError, setImageError] = useState('');
 
   useEffect(() => {
@@ -17,6 +18,7 @@ export default function App() {
     if (!sessionStorage.getItem('vl_username')) sessionStorage.setItem('vl_username', name);
     if (!sessionStorage.getItem('vl_color')) sessionStorage.setItem('vl_color', color);
     if (!sessionStorage.getItem('vl_roomId')) sessionStorage.setItem('vl_roomId', roomId);
+    if (!sessionStorage.getItem('vl_background')) sessionStorage.setItem('vl_background', 'room1');
     if (avatarImg && !sessionStorage.getItem('vl_avatarImg')) sessionStorage.setItem('vl_avatarImg', avatarImg);
 
     const game = initGame('game-container');
@@ -34,20 +36,41 @@ export default function App() {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    // Limit to 200 KB
-    const limitBytes = 200 * 1024;
+    // Limit original file to 4MB for safety, though it will be shrunk to ~4KB anyways
+    const limitBytes = 4 * 1024 * 1024;
     if (file.size > limitBytes) {
-      setImageError('ขนาดไฟล์ต้องไม่เกิน 200 KB');
+      setImageError('ขนาดไฟล์ต้องไม่เกิน 4 MB');
       setAvatarImg('');
-      e.target.value = ''; // Reset file input
+      e.target.value = '';
       return;
     }
 
     setImageError('');
     const reader = new FileReader();
-    reader.onloadend = () => {
-      const base64String = reader.result as string;
-      setAvatarImg(base64String);
+    reader.onload = (event) => {
+      const imgElement = new Image();
+      imgElement.onload = () => {
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return;
+
+        // Size the avatar to a sharp 64x64 square
+        const targetSize = 64;
+        canvas.width = targetSize;
+        canvas.height = targetSize;
+
+        // Crop from the center of the original image
+        const minDim = Math.min(imgElement.width, imgElement.height);
+        const sx = (imgElement.width - minDim) / 2;
+        const sy = (imgElement.height - minDim) / 2;
+
+        ctx.drawImage(imgElement, sx, sy, minDim, minDim, 0, 0, targetSize, targetSize);
+
+        // Export to highly compressed base64 JPEG
+        const base64String = canvas.toDataURL('image/jpeg', 0.85);
+        setAvatarImg(base64String);
+      };
+      imgElement.src = event.target?.result as string;
     };
     reader.readAsDataURL(file);
   };
@@ -73,6 +96,12 @@ export default function App() {
     window.dispatchEvent(new CustomEvent('vl-profile-updated', {
       detail: { name, color, roomId, avatarImg }
     }));
+  };
+
+  const handleBgChange = (bg: string) => {
+    setSelectedBg(bg);
+    sessionStorage.setItem('vl_background', bg);
+    window.dispatchEvent(new CustomEvent('vl-bg-updated', { detail: { bg } }));
   };
 
   const [showPanel, setShowPanel] = useState(false);
@@ -241,7 +270,7 @@ export default function App() {
               </div>
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                <label style={{ fontSize: '11px', color: '#aaa', textTransform: 'uppercase', letterSpacing: '1px' }}>Custom Avatar Image (Max 200KB)</label>
+                <label style={{ fontSize: '11px', color: '#aaa', textTransform: 'uppercase', letterSpacing: '1px' }}>Custom Avatar Image (Auto-Resized, Max 4MB)</label>
                 <input
                   type="file"
                   accept="image/*"
@@ -269,6 +298,33 @@ export default function App() {
                     </button>
                   </div>
                 )}
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                <label style={{ fontSize: '11px', color: '#aaa', textTransform: 'uppercase', letterSpacing: '1px' }}>Background Scene</label>
+                <div style={{ display: 'flex', gap: '6px' }}>
+                  {['room1', 'room2', 'room3'].map((bg) => (
+                    <button
+                      key={bg}
+                      type="button"
+                      onClick={() => handleBgChange(bg)}
+                      style={{
+                        flex: 1,
+                        padding: '6px 4px',
+                        borderRadius: '6px',
+                        border: selectedBg === bg ? '2px solid #00ff87' : '1px solid #444',
+                        backgroundColor: selectedBg === bg ? '#2a2a2a' : '#1a1a1a',
+                        color: '#fff',
+                        cursor: 'pointer',
+                        fontSize: '11px',
+                        fontWeight: selectedBg === bg ? 'bold' : 'normal',
+                        transition: 'all 0.2s'
+                      }}
+                    >
+                      {bg === 'room1' ? 'Room 1' : bg === 'room2' ? 'Room 2' : 'Room 3'}
+                    </button>
+                  ))}
+                </div>
               </div>
 
               <button

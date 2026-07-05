@@ -1,5 +1,8 @@
 import Phaser from 'phaser';
 import { socket } from '../socket';
+import room1Url from '../assets/room1.jpg';
+import room2Url from '../assets/room2.jpg';
+import room3Url from '../assets/room3.jpg';
 
 type Player = {
   name: string;
@@ -28,6 +31,7 @@ type RemotePlayer = {
 export class GameScene extends Phaser.Scene {
   player!: Phaser.GameObjects.Rectangle | Phaser.GameObjects.Image;
   playerText!: Phaser.GameObjects.Text;
+  backgroundImage!: Phaser.GameObjects.Image;
   cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
   wasdKeys!: {
     W: Phaser.Input.Keyboard.Key;
@@ -45,13 +49,53 @@ export class GameScene extends Phaser.Scene {
     
     if (avatarImg) {
       if (this.textures.exists(key)) {
-        this.textures.remove(key);
+        const img = this.add.image(x, y, key);
+        img.setDisplaySize(32, 32);
+        return img;
       }
-      this.textures.addBase64(key, avatarImg);
       
-      const img = this.add.image(x, y, key);
-      img.setDisplaySize(32, 32);
-      return img;
+      // Return a temporary colored rectangle while the image is loading
+      const placeholder = this.add.rectangle(x, y, 32, 32, color);
+      
+      const loaderImg = new Image();
+      loaderImg.onload = () => {
+        // Safe check: Exit if the scene is destroyed or no longer active
+        if (!this.sys || !this.sys.isActive() || !this.textures || !this.add) {
+          return;
+        }
+        
+        try {
+          if (this.textures.exists(key)) {
+            this.textures.remove(key);
+          }
+          
+          this.textures.addImage(key, loaderImg);
+          
+          if (placeholder.active) {
+            const px = placeholder.x;
+            const py = placeholder.y;
+            placeholder.destroy();
+            
+            const img = this.add.image(px, py, key);
+            img.setDisplaySize(32, 32);
+            
+            if (id) {
+              const remoteP = this.otherPlayers.get(id);
+              if (remoteP && remoteP.body === placeholder) {
+                remoteP.body = img;
+              }
+            } else {
+              this.player = img;
+              this.cameras.main.startFollow(this.player, true, 0.08, 0.08);
+            }
+          }
+        } catch (err) {
+          console.error("Error creating player texture", err);
+        }
+      };
+      loaderImg.src = avatarImg;
+      
+      return placeholder;
     } else {
       return this.add.rectangle(x, y, 32, 32, color);
     }
@@ -78,12 +122,18 @@ export class GameScene extends Phaser.Scene {
       p.color = color;
       p.avatarImg = avatarImg;
 
-      // If local player, re-anchor the camera
-      if (!id) {
+      // If local player and is ready, re-anchor camera
+      if (!id && p.body instanceof Phaser.GameObjects.Image) {
         this.player = p.body;
         this.cameras.main.startFollow(this.player, true, 0.08, 0.08);
       }
     }
+  }
+
+  preload() {
+    this.load.image('room1', room1Url);
+    this.load.image('room2', room2Url);
+    this.load.image('room3', room3Url);
   }
 
   create() {
@@ -92,8 +142,10 @@ export class GameScene extends Phaser.Scene {
     // 1. Set world bounds
     this.cameras.main.setBounds(0, 0, 2000, 2000);
 
-    // 2. Draw a beautiful dark space background grid
-    this.add.grid(1000, 1000, 2000, 2000, 64, 64, 0x1a1a1a, 1, 0x2e2e2e, 1);
+    // 2. Add dynamic room background image
+    const savedBg = sessionStorage.getItem('vl_background') || 'room1';
+    this.backgroundImage = this.add.image(1000, 1000, savedBg);
+    this.backgroundImage.setDisplaySize(2000, 2000);
 
     // 3. Register inputs
     this.cursors = this.input.keyboard!.createCursorKeys();
@@ -228,6 +280,16 @@ export class GameScene extends Phaser.Scene {
 
     window.addEventListener('vl-profile-updated', onProfileUpdate);
 
+    // Background updated listener (from React App.tsx background select)
+    const onBgUpdate = (e: Event) => {
+      const { bg } = (e as CustomEvent).detail;
+      if (this.backgroundImage) {
+        this.backgroundImage.setTexture(bg);
+      }
+    };
+
+    window.addEventListener('vl-bg-updated', onBgUpdate);
+
     // Disable Phaser keyboard input and preventDefault when typing in HTML inputs
     const onInputFocus = () => {
       if (this.input && this.input.keyboard) {
@@ -252,6 +314,7 @@ export class GameScene extends Phaser.Scene {
       socket.off('connect', joinLobby);
       socket.off('players', onPlayers);
       window.removeEventListener('vl-profile-updated', onProfileUpdate);
+      window.removeEventListener('vl-bg-updated', onBgUpdate);
       window.removeEventListener('vl-input-focus', onInputFocus);
       window.removeEventListener('vl-input-blur', onInputBlur);
     });

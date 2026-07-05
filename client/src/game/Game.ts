@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import { socket } from '../socket';
+import room1Image from '../assets/room1.avif';
 
 type Player = {
   name: string;
@@ -36,14 +37,20 @@ export class GameScene extends Phaser.Scene {
   lastSent = 0;
   otherPlayers: Map<string, RemotePlayer> = new Map();
 
+  preload() {
+    this.load.image('background', room1Image);
+  }
+
   create() {
     console.log('GAME START');
 
     // 1. Set world bounds
     this.cameras.main.setBounds(0, 0, 2000, 2000);
 
-    // 2. Draw a beautiful dark space background grid
-    this.add.grid(1000, 1000, 2000, 2000, 64, 64, 0x1a1a1a, 1, 0x2e2e2e, 1);
+    // 2. Add background image (scaled to 2000x2000 world size)
+    const bg = this.add.image(1000, 1000, 'background');
+    bg.setDisplaySize(2000, 2000);
+    bg.setDepth(-10); // Ensure background stays behind all player sprites
 
     // 3. Register inputs
     this.cursors = this.input.keyboard!.createCursorKeys();
